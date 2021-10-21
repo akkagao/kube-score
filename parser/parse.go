@@ -166,6 +166,8 @@ func detectAndDecode(cnf config.Configuration, s *parsedObjects, fileName string
 		return err
 	}
 
+	detect.Kind = strings.ToUpper(detect.Kind[:1]) + detect.Kind[1:]
+
 	detectedVersion := schema.FromAPIVersionAndKind(detect.ApiVersion, detect.Kind)
 
 	// Parse lists and their items recursively
