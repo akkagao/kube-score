@@ -26,10 +26,10 @@ func hasMatching(budgets []ks.PodDisruptionBudget, namespace string, labels map[
 
 		selector, err := metav1.LabelSelectorAsSelector(budget.PodDisruptionBudgetSelector())
 		if err != nil {
-			return false, fmt.Errorf("failed to create selector: %v", err)
+			return false, fmt.Errorf("failed to create selector: %w", err)
 		}
 
-		if selector.Matches(internal.MapLables(labels)) {
+		if selector.Matches(internal.MapLabels(labels)) {
 			return true, nil
 		}
 	}

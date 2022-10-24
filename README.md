@@ -25,7 +25,7 @@ kube-score is easy to install, and is available from the following sources:
 |-----------------------------------------------------|-----------------------------------------------------------------------------------------|
 | Pre-built binaries for macOS, Linux, and Windows    | [GitHub releases](https://github.com/zegl/kube-score/releases)                          |
 | Docker                                              | `docker pull zegl/kube-score` ([Docker Hub)](https://hub.docker.com/r/zegl/kube-score/) |
-| Homebrew  (macOS and Linux)                         | `brew install kube-score/tap/kube-score`                                                |
+| Homebrew  (macOS and Linux)                         | `brew install kube-score`                                                |
 | [Krew](https://krew.sigs.k8s.io/) (macOS and Linux) | `kubectl krew install score`                                                            |
 
 
@@ -85,7 +85,7 @@ kubectl api-resources --verbs=list --namespaced -o name \
 ### Example with Docker
 
 ```bash
-docker run -v $(pwd):/project zegl/kube-score:v1.10.0 score my-app/*.yaml
+docker run -v $(pwd):/project zegl/kube-score:latest score my-app/*.yaml
 ```
 
 ## Configuration
@@ -102,6 +102,7 @@ Actions:
 
 Flags for score:
       --disable-ignore-checks-annotations   Set to true to disable the effect of the 'kube-score/ignore' annotations
+      --disable-optional-checks-annotations Set to true to disable the effect of the 'kube-score/enable' annotations
       --enable-optional-test strings        Enable an optional test, can be set multiple times
       --exit-one-on-warning                 Exit with code 1 in case of warnings
       --help                                Print help
@@ -109,7 +110,7 @@ Flags for score:
       --ignore-container-memory-limit       Disables the requirement of setting a container memory limit
       --ignore-test strings                 Disable a test, can be set multiple times
       --kubernetes-version string           Setting the kubernetes-version will affect the checks ran against the manifests. Set this to the version of Kubernetes that you're using in production for the best results. (default "v1.18")
-  -o, --output-format string                Set to 'human', 'json' or 'ci'. If set to ci, kube-score will output the program in a format that is easier to parse by other programs. (default "human")
+  -o, --output-format string                Set to 'human', 'json', 'ci' or 'sarif'. If set to ci, kube-score will output the program in a format that is easier to parse by other programs. Sarif output allows for easier integration with CI platforms. (default "human")
       --output-version string               Changes the version of the --output-format. The 'json' format has version 'v2' (default) and 'v1' (deprecated, will be removed in v1.7.0). The 'human' and 'ci' formats has only version 'v1' (default). If not explicitly set, the default version for that particular output format will be used.
   -v, --verbose count                       Enable verbose output, can be set multiple times for increased verbosity.
 ```
@@ -143,6 +144,47 @@ spec:
   type: NodePort
 ```
 
+### Enabling a optional test
+
+Optional tests can be enabled in the whole run of the program, with the `--enable-optional-test` flag.
+
+A test can also be enabled on a per-object basis, by adding the annotation `kube-score/enable` to the object.
+The value should be a comma separated string of the [test IDs](README_CHECKS.md).
+
+Example:
+
+Testing this object will enable the `container-seccomp-profile` test.
+Also multiple tests defined by `kube-score/ignore` are also ignored at the same.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: optional-test-manifest-deployment
+  labels:
+    app: optional-test-manifest
+  annotations:
+    kube-score/ignore: pod-networkpolicy,container-resources,container-image-pull-policy,container-security-context-privileged,container-security-context-user-group-id,container-security-context-readonlyrootfilesystem,container-ephemeral-storage-request-and-limit
+    kube-score/enable: container-seccomp-profile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: optional-test-manifest
+  template:
+    metadata:
+      labels:
+        app: optional-test-manifest
+    spec:
+      containers:
+      - name: optional-test-manifest
+        image: busybox:1.34
+        command:
+        - /bin/sh
+        - -c
+        - date; env; tail -f /dev/null
+```
+
 ## Building from source
 
 `kube-score` requires [Go](https://golang.org/) `1.11` or later to build. Clone this repository, and then:
@@ -158,3 +200,15 @@ go test -v github.com/zegl/kube-score/...
 ## Contributing?
 
 Do you want to help out? Take a look at the [Contributing Guidelines](./.github/CONTRIBUTING.md) for more info. 🤩
+
+## Sponsors
+
+The development of kube-score is proudly sponsored by [Sturdy](https://github.com/sturdy-dev/sturdy). 🐥
+
+<p align="center"><a href="https://getsturdy.com/?ref=kube-score"><img src="https://getsturdy.com/img/Sturdy-Logotype-Transparent.png" height="200"></a></p>
+
+## Made by
+
+<a href="https://github.com/zegl/kube-score/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=zegl/kube-score" />
+</a>

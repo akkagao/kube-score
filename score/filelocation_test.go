@@ -1,8 +1,9 @@
 package score
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/zegl/kube-score/config"
 	ks "github.com/zegl/kube-score/domain"
@@ -11,7 +12,7 @@ import (
 func TestFileLocationHelm(t *testing.T) {
 	sc, err := testScore(config.Configuration{
 		AllFiles:          []ks.NamedReader{testFile("linenumbers-helm.yaml")},
-		KubernetesVersion: config.Semver{1, 18},
+		KubernetesVersion: config.Semver{Major: 1, Minor: 18},
 	})
 	assert.Nil(t, err)
 	for _, c := range sc {
@@ -24,7 +25,7 @@ func TestFileLocationHelm(t *testing.T) {
 func TestFileLocation(t *testing.T) {
 	sc, err := testScore(config.Configuration{
 		AllFiles:          []ks.NamedReader{testFile("linenumbers.yaml")},
-		KubernetesVersion: config.Semver{1, 18},
+		KubernetesVersion: config.Semver{Major: 1, Minor: 18},
 	})
 	assert.Nil(t, err)
 	for _, c := range sc {

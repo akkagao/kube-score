@@ -1,16 +1,15 @@
 package score
 
 import (
-	"io"
 	"os"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 	"github.com/zegl/kube-score/config"
 	ks "github.com/zegl/kube-score/domain"
 	"github.com/zegl/kube-score/parser"
 	"github.com/zegl/kube-score/scorecard"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func testFile(name string) *os.File {
@@ -40,8 +39,28 @@ func testExpectedScoreWithConfig(t *testing.T, config config.Configuration, test
 	return nil
 }
 
+func wasSkipped(t *testing.T, config config.Configuration, testcase string) bool {
+	sc, err := testScore(config)
+	assert.NoError(t, err)
+	for _, objectScore := range sc {
+		for _, s := range objectScore.Checks {
+			if s.Check.Name == testcase {
+				return s.Skipped
+			}
+		}
+	}
+
+	assert.Fail(t, "test was not run")
+	return false
+}
+
 func testScore(config config.Configuration) (scorecard.Scorecard, error) {
-	parsed, err := parser.ParseFiles(config)
+	p, err := parser.New()
+	if err != nil {
+		return nil, err
+	}
+
+	parsed, err := p.ParseFiles(config)
 	if err != nil {
 		return nil, err
 	}
@@ -57,16 +76,8 @@ func testScore(config config.Configuration) (scorecard.Scorecard, error) {
 func testExpectedScore(t *testing.T, filename string, testcase string, expectedScore scorecard.Grade) []scorecard.TestScoreComment {
 	return testExpectedScoreWithConfig(t, config.Configuration{
 		AllFiles:          []ks.NamedReader{testFile(filename)},
-		KubernetesVersion: config.Semver{1, 18},
+		KubernetesVersion: config.Semver{Major: 1, Minor: 18},
 	}, testcase, expectedScore)
-}
-
-type unnamedReader struct {
-	io.Reader
-}
-
-func (unnamedReader) Name() string {
-	return ""
 }
 
 func TestPodContainerNoResources(t *testing.T) {
@@ -157,6 +168,15 @@ func TestPodContainerResourceRequestsEqualLimitsNoLimits(t *testing.T) {
 	}, "Container Resource Requests Equal Limits", scorecard.GradeCritical)
 }
 
+func TestPodContainerResourceRequestsEqualLimitsNoLimitsAnnotation(t *testing.T) {
+	t.Parallel()
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:                    []ks.NamedReader{testFile("pod-test-resources-no-limits-annotation-optional.yaml")},
+		UseOptionalChecksAnnotation: true,
+	}, "Container Resource Requests Equal Limits", scorecard.GradeCritical)
+}
+
 func TestPodContainerMemoryRequestsEqualLimitsNoLimits(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +189,15 @@ func TestPodContainerMemoryRequestsEqualLimitsNoLimits(t *testing.T) {
 	}, "Container Memory Requests Equal Limits", scorecard.GradeCritical)
 }
 
+func TestPodContainerMemoryRequestsEqualLimitsNoLimitsAnnotation(t *testing.T) {
+	t.Parallel()
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:                    []ks.NamedReader{testFile("pod-test-resources-no-limits-annotation-optional.yaml")},
+		UseOptionalChecksAnnotation: true,
+	}, "Container Memory Requests Equal Limits", scorecard.GradeCritical)
+}
+
 func TestPodContainerCPURequestsEqualLimitsNoLimits(t *testing.T) {
 	t.Parallel()
 
@@ -178,6 +207,15 @@ func TestPodContainerCPURequestsEqualLimitsNoLimits(t *testing.T) {
 	testExpectedScoreWithConfig(t, config.Configuration{
 		AllFiles:             []ks.NamedReader{testFile("pod-test-resources-no-limits.yaml")},
 		EnabledOptionalTests: structMap,
+	}, "Container CPU Requests Equal Limits", scorecard.GradeCritical)
+}
+
+func TestPodContainerCPURequestsEqualLimitsNoLimitsAnnotation(t *testing.T) {
+	t.Parallel()
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:                    []ks.NamedReader{testFile("pod-test-resources-no-limits-annotation-optional.yaml")},
+		UseOptionalChecksAnnotation: true,
 	}, "Container CPU Requests Equal Limits", scorecard.GradeCritical)
 }
 
@@ -306,4 +344,174 @@ func TestList(t *testing.T) {
 
 	assert.True(t, hasService)
 	assert.True(t, hasDeployment)
+}
+
+// Note the input file specifies a condition that would fail the optional matching request and limit test, but returns GradeAllOK
+// when only the default case is evaluated
+func TestPodContainerStorageEphemeralRequestAndLimitOK(t *testing.T) {
+	t.Parallel()
+	testExpectedScore(t, "pod-ephemeral-storage-request-nomatch-limit.yaml", "Container Ephemeral Storage Request and Limit", scorecard.GradeAllOK)
+}
+
+func TestPodContainerStorageEphemeralNoLimit(t *testing.T) {
+	t.Parallel()
+	testExpectedScore(t, "pod-ephemeral-storage-missing-limit.yaml", "Container Ephemeral Storage Request and Limit", scorecard.GradeCritical)
+}
+
+func TestPodContainerStorageEphemeralNoRequest(t *testing.T) {
+	t.Parallel()
+	testExpectedScore(t, "pod-ephemeral-storage-missing-request.yaml", "Container Ephemeral Storage Request and Limit", scorecard.GradeWarning)
+}
+
+func TestPodContainerStorageEphemeralRequestEqualsLimit(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["container-ephemeral-storage-request-equals-limit"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-ephemeral-storage-request-matches-limit.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Container Ephemeral Storage Request Equals Limit", scorecard.GradeAllOK)
+}
+
+func TestPodContainerStorageEphemeralRequestNoMatchLimit(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["container-ephemeral-storage-request-equals-limit"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-ephemeral-storage-request-nomatch-limit.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Container Ephemeral Storage Request Equals Limit", scorecard.GradeCritical)
+}
+
+func TestPodContainerStorageEphemeralRequestNoMatchLimitAnnotation(t *testing.T) {
+	t.Parallel()
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:                    []ks.NamedReader{testFile("pod-ephemeral-storage-request-nomatch-limit-annotation-optional.yaml")},
+		UseOptionalChecksAnnotation: true,
+	}, "Container Ephemeral Storage Request Equals Limit", scorecard.GradeCritical)
+}
+
+func TestPodContainerStorageEphemeralIgnoreAnnotation(t *testing.T) {
+
+	t.Parallel()
+	s, err := testScore(config.Configuration{
+		VerboseOutput:             0,
+		AllFiles:                  []ks.NamedReader{testFile("pod-ephemeral-storage-annotation-ignore.yaml")},
+		UseIgnoreChecksAnnotation: true,
+	})
+	assert.Nil(t, err)
+	assert.Len(t, s, 1)
+
+	tested := false
+
+	for _, o := range s {
+		for _, c := range o.Checks {
+			if c.Check.ID == "container-resources" {
+				assert.True(t, c.Skipped)
+				tested = true
+			}
+		}
+		assert.Equal(t, "pod-ephemeral-storage-annotation-ignore", o.ObjectMeta.Name)
+	}
+	assert.True(t, tested)
+}
+
+func TestPodContainerPortsContainerPortMissing(t *testing.T) {
+	t.Parallel()
+	structMap := make(map[string]struct{})
+	structMap["container-ports-check"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-container-ports-missing-containerport.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Container Ports Check", scorecard.GradeCritical)
+}
+
+func TestPodContainerPortsContainerPortMissingAnnotation(t *testing.T) {
+	t.Parallel()
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:                    []ks.NamedReader{testFile("pod-container-ports-missing-containerport-annotation-optional.yaml")},
+		UseOptionalChecksAnnotation: true,
+	}, "Container Ports Check", scorecard.GradeCritical)
+}
+
+func TestPodContainerPortsDuplicateNames(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["container-ports-check"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-container-ports-duplicate-names.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Container Ports Check", scorecard.GradeCritical)
+}
+
+func TestPodContainerPortsNameLength(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["container-ports-check"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-container-ports-name-too-long.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Container Ports Check", scorecard.GradeCritical)
+}
+
+func TestPodContainerPortsOK(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["container-ports-check"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-container-ports-ok.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Container Ports Check", scorecard.GradeAllOK)
+}
+
+func TestPodEnvOK(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["environment-variable-key-duplication"] = struct{}{}
+
+	testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-env-ok.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Environment Variable Key Duplication", scorecard.GradeAllOK)
+}
+
+func TestPodEnvDuplicated(t *testing.T) {
+	t.Parallel()
+
+	structMap := make(map[string]struct{})
+	structMap["environment-variable-key-duplication"] = struct{}{}
+
+	actual := testExpectedScoreWithConfig(t, config.Configuration{
+		AllFiles:             []ks.NamedReader{testFile("pod-env-duplicated.yaml")},
+		EnabledOptionalTests: structMap,
+	}, "Environment Variable Key Duplication", scorecard.GradeCritical)
+
+	expected := []scorecard.TestScoreComment{
+		{
+			Path:        "foobar",
+			Summary:     "Environment Variable Key Duplication",
+			Description: "Container environment variable key 'bar' is duplicated",
+		},
+		{
+			Path:        "foobar",
+			Summary:     "Environment Variable Key Duplication",
+			Description: "Container environment variable key 'baz' is duplicated",
+		},
+	}
+	diff := cmp.Diff(expected, actual)
+	assert.Empty(t, diff)
 }

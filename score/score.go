@@ -1,6 +1,9 @@
 package score
 
 import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/zegl/kube-score/config"
 	ks "github.com/zegl/kube-score/domain"
 	"github.com/zegl/kube-score/score/apps"
@@ -17,9 +20,6 @@ import (
 	"github.com/zegl/kube-score/score/service"
 	"github.com/zegl/kube-score/score/stable"
 	"github.com/zegl/kube-score/scorecard"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func RegisterAllChecks(allObjects ks.AllTypes, cnf config.Configuration) *checks.Checks {
@@ -48,20 +48,20 @@ func Score(allObjects ks.AllTypes, cnf config.Configuration) (*scorecard.Scoreca
 	scoreCard := scorecard.New()
 
 	newObject := func(typeMeta metav1.TypeMeta, objectMeta metav1.ObjectMeta) *scorecard.ScoredObject {
-		return scoreCard.NewObject(typeMeta, objectMeta, cnf.UseIgnoreChecksAnnotation)
+		return scoreCard.NewObject(typeMeta, objectMeta, cnf)
 	}
 
 	for _, ingress := range allObjects.Ingresses() {
 		o := newObject(ingress.GetTypeMeta(), ingress.GetObjectMeta())
 		for _, test := range allChecks.Ingresses() {
-			o.Add(test.Fn(ingress), test.Check, ingress)
+			o.Add(test.Fn(ingress), test.Check, ingress, ingress.GetObjectMeta().Annotations)
 		}
 	}
 
 	for _, meta := range allObjects.Metas() {
 		o := newObject(meta.TypeMeta, meta.ObjectMeta)
 		for _, test := range allChecks.Metas() {
-			o.Add(test.Fn(meta), test.Check, meta)
+			o.Add(test.Fn(meta), test.Check, meta, meta.ObjectMeta.Annotations)
 		}
 	}
 
@@ -72,7 +72,7 @@ func Score(allObjects ks.AllTypes, cnf config.Configuration) (*scorecard.Scoreca
 				ObjectMeta: pod.Pod().ObjectMeta,
 				Spec:       pod.Pod().Spec,
 			}, pod.Pod().TypeMeta)
-			o.Add(score, test.Check, pod)
+			o.Add(score, test.Check, pod, pod.Pod().ObjectMeta.Annotations)
 		}
 	}
 
@@ -80,14 +80,17 @@ func Score(allObjects ks.AllTypes, cnf config.Configuration) (*scorecard.Scoreca
 		o := newObject(podspecer.GetTypeMeta(), podspecer.GetObjectMeta())
 		for _, test := range allChecks.Pods() {
 			score := test.Fn(podspecer.GetPodTemplateSpec(), podspecer.GetTypeMeta())
-			o.Add(score, test.Check, podspecer)
+			o.Add(score, test.Check, podspecer,
+				podspecer.GetObjectMeta().Annotations,
+				podspecer.GetPodTemplateSpec().Annotations,
+			)
 		}
 	}
 
 	for _, service := range allObjects.Services() {
 		o := newObject(service.Service().TypeMeta, service.Service().ObjectMeta)
 		for _, test := range allChecks.Services() {
-			o.Add(test.Fn(service.Service()), test.Check, service)
+			o.Add(test.Fn(service.Service()), test.Check, service, service.Service().Annotations)
 		}
 	}
 
@@ -98,7 +101,7 @@ func Score(allObjects ks.AllTypes, cnf config.Configuration) (*scorecard.Scoreca
 			if err != nil {
 				return nil, err
 			}
-			o.Add(res, test.Check, statefulset)
+			o.Add(res, test.Check, statefulset, statefulset.StatefulSet().ObjectMeta.Annotations)
 		}
 	}
 
@@ -109,35 +112,35 @@ func Score(allObjects ks.AllTypes, cnf config.Configuration) (*scorecard.Scoreca
 			if err != nil {
 				return nil, err
 			}
-			o.Add(res, test.Check, deployment)
+			o.Add(res, test.Check, deployment, deployment.Deployment().ObjectMeta.Annotations)
 		}
 	}
 
 	for _, netpol := range allObjects.NetworkPolicies() {
 		o := newObject(netpol.NetworkPolicy().TypeMeta, netpol.NetworkPolicy().ObjectMeta)
 		for _, test := range allChecks.NetworkPolicies() {
-			o.Add(test.Fn(netpol.NetworkPolicy()), test.Check, netpol)
+			o.Add(test.Fn(netpol.NetworkPolicy()), test.Check, netpol, netpol.NetworkPolicy().ObjectMeta.Annotations)
 		}
 	}
 
 	for _, cjob := range allObjects.CronJobs() {
 		o := newObject(cjob.GetTypeMeta(), cjob.GetObjectMeta())
 		for _, test := range allChecks.CronJobs() {
-			o.Add(test.Fn(cjob), test.Check, cjob)
+			o.Add(test.Fn(cjob), test.Check, cjob, cjob.GetObjectMeta().Annotations)
 		}
 	}
 
 	for _, hpa := range allObjects.HorizontalPodAutoscalers() {
 		o := newObject(hpa.GetTypeMeta(), hpa.GetObjectMeta())
 		for _, test := range allChecks.HorizontalPodAutoscalers() {
-			o.Add(test.Fn(hpa), test.Check, hpa)
+			o.Add(test.Fn(hpa), test.Check, hpa, hpa.GetObjectMeta().Annotations)
 		}
 	}
 
 	for _, pdb := range allObjects.PodDisruptionBudgets() {
 		o := newObject(pdb.GetTypeMeta(), pdb.GetObjectMeta())
 		for _, test := range allChecks.PodDisruptionBudgets() {
-			o.Add(test.Fn(pdb), test.Check, pdb)
+			o.Add(test.Fn(pdb), test.Check, pdb, pdb.GetObjectMeta().Annotations)
 		}
 	}
 

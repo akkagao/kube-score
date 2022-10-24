@@ -12,24 +12,26 @@ import (
 )
 
 func TestParse(t *testing.T) {
-
 	cases := []struct {
 		fname    string
 		expected error
 	}{
 		{
 			"testdata/invalid-yaml.yaml",
-			fmt.Errorf("Failed to parse /v1, Kind=Service: err=v1.Service.Spec: v1.ServiceSpec.Ports: []v1.ServicePort: v1.ServicePort.NodePort: readUint32: unexpected character: \xff, error found in #10 byte of ...|odePort\":\"${PORT}\",\"|..., bigger context ...|\"namespace\":\"test\"},\"spec\":{\"ports\":[{\"nodePort\":\"${PORT}\",\"port\":\"${PORT_EXPOSE}\",\"targetPort\":\"${P|..."),
+			fmt.Errorf("Failed to parse /v1, Kind=Service: err=json: cannot unmarshal string into Go struct field ServicePort.spec.ports.nodePort of type int32"),
 		}, {
 			"testdata/valid-yaml.yaml",
 			nil,
 		},
 	}
 
+	parser, err := New()
+	assert.NoError(t, err)
+
 	for _, tc := range cases {
 		fp, err := os.Open(tc.fname)
 		assert.Nil(t, err)
-		_, err = ParseFiles(config.Configuration{
+		_, err = parser.ParseFiles(config.Configuration{
 			AllFiles: []ks.NamedReader{fp},
 		})
 		if tc.expected == nil {

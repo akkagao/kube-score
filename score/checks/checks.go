@@ -43,7 +43,7 @@ func NewCheck(name, targetType, comment string, optional bool) ks.Check {
 
 func machineFriendlyName(in string) string {
 	in = strings.ToLower(in)
-	in = strings.Replace(in, " ", "-", -1)
+	in = strings.ReplaceAll(in, " ", "-")
 	return in
 }
 
@@ -123,22 +123,9 @@ type Checks struct {
 	cnf config.Configuration
 }
 
-func (c Checks) isIgnored(id string) bool {
-	_, ok := c.cnf.IgnoredTests[id]
-	return ok
-}
-
 func (c Checks) isEnabled(check ks.Check) bool {
-	if c.isIgnored(check.ID) {
-		return false
-	}
-
-	if !check.Optional {
-		return true
-	}
-
-	_, ok := c.cnf.EnabledOptionalTests[check.ID]
-	return ok
+	_, ok := c.cnf.IgnoredTests[check.ID]
+	return !ok
 }
 
 func (c *Checks) RegisterMetaCheck(name, comment string, fn MetaCheckFn) {

@@ -15,7 +15,7 @@ import (
 	"github.com/zegl/kube-score/scorecard"
 )
 
-func Human(scoreCard *scorecard.Scorecard, verboseOutput int, termWidth int) io.Reader {
+func Human(scoreCard *scorecard.Scorecard, verboseOutput int, termWidth int) (io.Reader, error) {
 	// Print the items sorted by scorecard key
 	var keys []string
 	for k := range *scoreCard {
@@ -37,23 +37,32 @@ func Human(scoreCard *scorecard.Scorecard, verboseOutput int, termWidth int) io.
 		}
 
 		// Adjust to termsize
-		fmt.Fprintf(w, safeRepeat(" ", min(80, termWidth)-writtenHeaderChars-2))
+		_, err := fmt.Fprint(w, safeRepeat(" ", min(80, termWidth)-writtenHeaderChars-2))
+		if err != nil {
+			return nil, fmt.Errorf("failed to write terminal padding: %w", err)
+		}
 
-		if scoredObject.AnyBelowOrEqualToGrade(scorecard.GradeCritical) {
-			fmt.Fprintf(w, "💥\n")
-		} else if scoredObject.AnyBelowOrEqualToGrade(scorecard.GradeWarning) {
-			fmt.Fprintf(w, "🤔\n")
-		} else {
-			fmt.Fprintf(w, "✅\n")
+		switch {
+		case scoredObject.AnyBelowOrEqualToGrade(scorecard.GradeCritical):
+			_, err = fmt.Fprintf(w, "💥\n")
+		case scoredObject.AnyBelowOrEqualToGrade(scorecard.GradeWarning):
+			_, err = fmt.Fprintf(w, "🤔\n")
+		default:
+			_, err = fmt.Fprintf(w, "✅\n")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to write: %w", err)
 		}
 
 		for _, card := range scoredObject.Checks {
 			r := outputHumanStep(card, verboseOutput, termWidth)
-			io.Copy(w, r)
+			if _, err := io.Copy(w, r); err != nil {
+				return nil, fmt.Errorf("failed to copy output: %w", err)
+			}
 		}
 	}
 
-	return w
+	return w, nil
 }
 
 func outputHumanStep(card scorecard.TestScore, verboseOutput int, termWidth int) io.Reader {
@@ -66,7 +75,8 @@ func outputHumanStep(card scorecard.TestScore, verboseOutput int, termWidth int)
 
 	var col color.Attribute
 
-	if card.Skipped || card.Grade >= scorecard.GradeAllOK {
+	switch {
+	case card.Skipped || card.Grade >= scorecard.GradeAllOK:
 		// Higher than or equal to --threshold-ok
 		col = color.FgGreen
 
@@ -75,10 +85,10 @@ func outputHumanStep(card scorecard.TestScore, verboseOutput int, termWidth int)
 			return w
 		}
 
-	} else if card.Grade >= scorecard.GradeWarning {
+	case card.Grade >= scorecard.GradeWarning:
 		// Higher than or equal to --threshold-warning
 		col = color.FgYellow
-	} else {
+	default:
 		// All lower than both --threshold-ok and --threshold-warning are critical
 		col = color.FgRed
 	}
@@ -106,7 +116,7 @@ func outputHumanStep(card scorecard.TestScore, verboseOutput int, termWidth int)
 			wrapper := wordwrap.Wrapper(wrapWidth, false)
 			wrapped := wrapper(comment.Description)
 			fmt.Fprintln(w)
-			fmt.Fprintf(w, wordwrap.Indent(wrapped, strings.Repeat(" ", 12), false))
+			fmt.Fprint(w, wordwrap.Indent(wrapped, strings.Repeat(" ", 12), false))
 		}
 
 		if len(comment.DocumentationURL) > 0 {

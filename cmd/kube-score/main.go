@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 
 	flag "github.com/spf13/pflag"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	"github.com/zegl/kube-score/config"
 	ks "github.com/zegl/kube-score/domain"
@@ -34,13 +34,16 @@ func main() {
 	cmds := map[string]cmdFunc{
 		"score": func(helpName string, args []string) {
 			if err := scoreFiles(helpName, args); err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "Failed to score files: %v", err)
+				_, _ = fmt.Fprintf(os.Stderr, "Failed to score files: %v\n", err)
 				os.Exit(1)
 			}
 		},
 
 		"list": func(helpName string, args []string) {
-			listChecks(helpName, args)
+			if err := listChecks(helpName, args); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Failed to list checks: %v\n", err)
+				os.Exit(1)
+			}
 		},
 
 		"version": func(helpName string, args []string) {
@@ -101,17 +104,18 @@ func scoreFiles(binName string, args []string) error {
 	ignoreContainerMemoryLimit := fs.Bool("ignore-container-memory-limit", false, "Disables the requirement of setting a container memory limit")
 	verboseOutput := fs.CountP("verbose", "v", "Enable verbose output, can be set multiple times for increased verbosity.")
 	printHelp := fs.Bool("help", false, "Print help")
-	outputFormat := fs.StringP("output-format", "o", "human", "Set to 'human', 'json' or 'ci'. If set to ci, kube-score will output the program in a format that is easier to parse by other programs.")
+	outputFormat := fs.StringP("output-format", "o", "human", "Set to 'human', 'json', 'ci' or 'sarif'. If set to ci, kube-score will output the program in a format that is easier to parse by other programs. Sarif output allows for easier integration with CI platforms.")
 	outputVersion := fs.String("output-version", "", "Changes the version of the --output-format. The 'json' format has version 'v2' (default) and 'v1' (deprecated, will be removed in v1.7.0). The 'human' and 'ci' formats has only version 'v1' (default). If not explicitly set, the default version for that particular output format will be used.")
 	optionalTests := fs.StringSlice("enable-optional-test", []string{}, "Enable an optional test, can be set multiple times")
 	ignoreTests := fs.StringSlice("ignore-test", []string{}, "Disable a test, can be set multiple times")
 	disableIgnoreChecksAnnotation := fs.Bool("disable-ignore-checks-annotations", false, "Set to true to disable the effect of the 'kube-score/ignore' annotations")
+	disableOptionalChecksAnnotation := fs.Bool("disable-optional-checks-annotations", false, "Set to true to disable the effect of the 'kube-score/enable' annotations")
 	kubernetesVersion := fs.String("kubernetes-version", "v1.18", "Setting the kubernetes-version will affect the checks ran against the manifests. Set this to the version of Kubernetes that you're using in production for the best results.")
 	setDefault(fs, binName, "score", false)
 
 	err := fs.Parse(args)
 	if err != nil {
-		return fmt.Errorf("failed to parse files: %s", err)
+		return fmt.Errorf("failed to parse files: %w", err)
 	}
 
 	if *printHelp {
@@ -169,12 +173,18 @@ Use "-" as filename to read from STDIN.`, execName(binName))
 		IgnoredTests:                          ignoredTests,
 		EnabledOptionalTests:                  enabledOptionalTests,
 		UseIgnoreChecksAnnotation:             !*disableIgnoreChecksAnnotation,
+		UseOptionalChecksAnnotation:           !*disableOptionalChecksAnnotation,
 		KubernetesVersion:                     kubeVer,
 	}
 
-	parsedFiles, err := parser.ParseFiles(cnf)
+	p, err := parser.New()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initializer parser: %w", err)
+	}
+
+	parsedFiles, err := p.ParseFiles(cnf)
+	if err != nil {
+		return fmt.Errorf("failed to parse files: %w", err)
 	}
 
 	scoreCard, err := score.Score(parsedFiles, cnf)
@@ -183,11 +193,12 @@ Use "-" as filename to read from STDIN.`, execName(binName))
 	}
 
 	var exitCode int
-	if scoreCard.AnyBelowOrEqualToGrade(scorecard.GradeCritical) {
+	switch {
+	case scoreCard.AnyBelowOrEqualToGrade(scorecard.GradeCritical):
 		exitCode = 1
-	} else if *exitOneOnWarning && scoreCard.AnyBelowOrEqualToGrade(scorecard.GradeWarning) {
+	case *exitOneOnWarning && scoreCard.AnyBelowOrEqualToGrade(scorecard.GradeWarning):
 		exitCode = 1
-	} else {
+	default:
 		exitCode = 0
 	}
 
@@ -195,25 +206,29 @@ Use "-" as filename to read from STDIN.`, execName(binName))
 
 	version := getOutputVersion(*outputVersion, *outputFormat)
 
-	if *outputFormat == "json" && version == "v1" {
+	switch {
+	case *outputFormat == "json" && version == "v1":
 		d, _ := json.MarshalIndent(scoreCard, "", "    ")
 		w := bytes.NewBufferString("")
 		w.WriteString(string(d))
 		r = w
-	} else if *outputFormat == "json" && version == "v2" {
+	case *outputFormat == "json" && version == "v2":
 		r = json_v2.Output(scoreCard)
-	} else if *outputFormat == "human" && version == "v1" {
-		termWidth, _, err := terminal.GetSize(int(os.Stdin.Fd()))
+	case *outputFormat == "human" && version == "v1":
+		termWidth, _, err := term.GetSize(int(os.Stdin.Fd()))
 		// Assume a width of 80 if it can't be detected
 		if err != nil {
 			termWidth = 80
 		}
-		r = human.Human(scoreCard, *verboseOutput, termWidth)
-	} else if *outputFormat == "ci" && version == "v1" {
+		r, err = human.Human(scoreCard, *verboseOutput, termWidth)
+		if err != nil {
+			return err
+		}
+	case *outputFormat == "ci" && version == "v1":
 		r = ci.CI(scoreCard)
-	} else if *outputFormat == "sarif" {
+	case *outputFormat == "sarif":
 		r = sarif.Output(scoreCard)
-	} else {
+	default:
 		return fmt.Errorf("error: Unknown --output-format or --output-version")
 	}
 
@@ -236,15 +251,18 @@ func getOutputVersion(flagValue, format string) string {
 	}
 }
 
-func listChecks(binName string, args []string) {
+func listChecks(binName string, args []string) error {
 	fs := flag.NewFlagSet(binName, flag.ExitOnError)
 	printHelp := fs.Bool("help", false, "Print help")
 	setDefault(fs, binName, "list", false)
-	fs.Parse(args)
+	err := fs.Parse(args)
+	if err != nil {
+		return nil
+	}
 
 	if *printHelp {
 		fs.Usage()
-		return
+		return nil
 	}
 
 	allChecks := score.RegisterAllChecks(parser.Empty(), config.Configuration{})
@@ -255,9 +273,14 @@ func listChecks(binName string, args []string) {
 		if c.Optional {
 			optionalString = "optional"
 		}
-		output.Write([]string{c.ID, c.TargetType, c.Comment, optionalString})
+		err := output.Write([]string{c.ID, c.TargetType, c.Comment, optionalString})
+		if err != nil {
+			return nil
+		}
 	}
 	output.Flush()
+
+	return nil
 }
 
 func listToStructMap(items *[]string) map[string]struct{} {
